@@ -88,6 +88,7 @@ function createAccountService(api) {
 
 async function readState(extra = {}) {
   const { AUTH_PATH, ACCOUNTS_DIR, CURRENT_NAME_PATH } = codexAuthPaths();
+  await ensureAutosavedActiveAccount();
   const accounts = await listAccountNames();
   const current = await getCurrentAccountName(accounts);
   const hasActiveAuth = await pathExists(AUTH_PATH);
@@ -118,10 +119,14 @@ async function listAccountNames() {
 async function getCurrentAccountName(accounts) {
   const { fsp, path } = nodeDeps();
   const { AUTH_PATH, ACCOUNTS_DIR, CURRENT_NAME_PATH } = codexAuthPaths();
+  if (!(await pathExists(AUTH_PATH))) return null;
+  const matched = await findMatchingAccountByContents(accounts);
+  if (matched) return matched;
+
   try {
     const raw = await fsp.readFile(CURRENT_NAME_PATH, "utf8");
     const name = raw.trim();
-    if (name) return name;
+    if (name && accounts.includes(name)) return name;
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }
@@ -141,7 +146,7 @@ async function getCurrentAccountName(accounts) {
     /* fall through to content matching */
   }
 
-  return findMatchingAccountByContents(accounts);
+  return null;
 }
 
 async function findMatchingAccountByContents(accounts) {
@@ -176,6 +181,35 @@ async function saveCurrentAccount(rawName) {
   await fsp.copyFile(AUTH_PATH, accountPath(name));
   await fsp.writeFile(CURRENT_NAME_PATH, `${name}\n`, "utf8");
   return readState({ notice: `Saved current account as ${name}.` });
+}
+
+async function ensureAutosavedActiveAccount() {
+  const { fsp } = nodeDeps();
+  const { AUTH_PATH, ACCOUNTS_DIR, CURRENT_NAME_PATH } = codexAuthPaths();
+  if (!(await pathExists(AUTH_PATH))) return null;
+
+  const accounts = await listAccountNames();
+  const matched = await findMatchingAccountByContents(accounts);
+  if (matched) {
+    await fsp.writeFile(CURRENT_NAME_PATH, `${matched}\n`, "utf8");
+    return matched;
+  }
+
+  await ensureDir(ACCOUNTS_DIR);
+  const name = await nextAvailableAccountName("account");
+  await fsp.copyFile(AUTH_PATH, accountPath(name));
+  await fsp.writeFile(CURRENT_NAME_PATH, `${name}\n`, "utf8");
+  return name;
+}
+
+async function nextAvailableAccountName(baseName) {
+  const accounts = new Set(await listAccountNames());
+  if (!accounts.has(baseName)) return baseName;
+  for (let index = 2; index < 10_000; index += 1) {
+    const name = `${baseName}-${index}`;
+    if (!accounts.has(name)) return name;
+  }
+  throw new Error("Could not find an available account name.");
 }
 
 async function switchAccount(rawName) {
@@ -628,9 +662,7 @@ function accountSelectControl(state, panel, accountState, accounts) {
     select.appendChild(option);
   }
   select.value = current;
-  select.addEventListener("click", (event) => {
-    event.stopPropagation();
-  });
+  protectInteractiveControl(select, { preventClickDefault: false });
   select.addEventListener("change", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -740,6 +772,7 @@ function smallButton(label) {
   button.textContent = label;
   button.style.cssText =
     "height:24px;border:0;border-radius:6px;padding:0 8px;background:color-mix(in srgb,var(--color-token-text-primary,currentColor) 10%,transparent);color:var(--color-token-text-primary,currentColor);font:inherit;font-size:12px;line-height:1;cursor:pointer;";
+  protectInteractiveControl(button);
   return button;
 }
 
@@ -751,6 +784,7 @@ function iconButton(label, text) {
   button.title = label;
   button.style.cssText =
     "display:grid;place-items:center;width:22px;height:22px;border:0;border-radius:5px;background:transparent;color:var(--color-token-text-secondary,currentColor);font:inherit;font-size:16px;line-height:1;cursor:pointer;";
+  protectInteractiveControl(button);
   return button;
 }
 
@@ -849,7 +883,27 @@ function settingsButton(label) {
     "text-token-text-primary hover:bg-token-foreground/10 disabled:cursor-default disabled:opacity-50";
   button.style.border = "1px solid color-mix(in srgb, currentColor 14%, transparent)";
   button.style.backgroundColor = "color-mix(in srgb, currentColor 5%, transparent)";
+  protectInteractiveControl(button);
   return button;
+}
+
+function protectInteractiveControl(element, options = {}) {
+  const preventClickDefault = options.preventClickDefault !== false;
+  const stop = (event) => {
+    event.stopPropagation();
+  };
+  element.addEventListener("pointerdown", stop, true);
+  element.addEventListener("mousedown", stop, true);
+  element.addEventListener("mouseup", stop, true);
+  element.addEventListener("keydown", stop, true);
+  element.addEventListener(
+    "click",
+    (event) => {
+      if (preventClickDefault) event.preventDefault();
+      event.stopPropagation();
+    },
+    true,
+  );
 }
 
 function settingsStatus(text, isError = false) {

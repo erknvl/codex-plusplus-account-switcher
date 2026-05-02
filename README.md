@@ -11,6 +11,7 @@ It follows the same storage model as `codex-auth`:
 ## Features
 
 - Save the currently signed-in Codex account under a name.
+- Automatically save the active auth file as `account`, `account-2`, etc. when it does not match any saved profile.
 - Add another account by backing up and clearing the active auth file so Codex can sign in again.
 - Switch between saved accounts from the account/settings popup.
 - Use the account selector in the sidebar settings popup for quick switching.
