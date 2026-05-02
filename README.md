@@ -14,8 +14,6 @@ Codex++ tweak for saving, switching, and managing Codex desktop auth sessions.
 
 ## Storage
 
-The tweak follows the same storage model as `codex-auth`:
-
 - active auth: `~/.codex/auth.json`
 - saved accounts: `~/.codex/auth_accounts/<name>.json`
 - current account marker: `~/.codex/current_account`
